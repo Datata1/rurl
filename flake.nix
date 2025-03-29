@@ -76,7 +76,7 @@
           export PATH=${pkgs.lib.makeBinPath [ pkgs.postgresql pkgs.process-compose ]}:$PATH
 
           echo "Starting services with process-compose..."
-          ${pkgs.process-compose}/bin/process-compose -f "$CONFIG_FILE"
+          ${pkgs.process-compose}/bin/process-compose -f "$CONFIG_FILE"  -t=false
         '';
 
         apps.default = {
