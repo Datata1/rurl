@@ -1,0 +1,10 @@
+version: "0.5"
+
+processes:
+  db:
+    command: /bin/sh -c "$DB_COMMAND"
+  app:
+    command: /bin/sh -c "$APP_COMMAND"
+    depends_on:
+      db:
+        condition: service_started

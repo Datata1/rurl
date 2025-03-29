@@ -6,63 +6,82 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
     flake-utils.url  = "github:numtide/flake-utils";
+    postgres = {
+      url = "github:Datata1/my_flakes";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils, ... }:
+  outputs = { self, nixpkgs, rust-overlay, flake-utils, postgres, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        # Korrekte Anwendung des rust-overlay
         overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs {
           inherit system overlays;
         };
 
-        # Definiere die Rust-Toolchain (Version ggf. anpassen)
+        # TODO: latest ist impure, besser wäre ein fester Wert
         rustToolchain = pkgs.rust-bin.stable.latest.default.override { 
            extensions = [ "rust-src" "rust-analyzer" ];
         };
 
-        # Systemabhängigkeiten, die zum Bauen benötigt werden
         nativeBuildInputs = with pkgs; [
           pkg-config 
         ];
+
         buildInputs = with pkgs; [
-          sqlite    
-          openssl    
-          # Füge hier weitere C-Bibliotheken hinzu, falls deine Crates sie brauchen
+          postgresql.lib    
+          openssl
+          sqlx-cli    
         ];
+
+        postgresAppProgram = postgres.apps.${system}.postgres.program;
+
+        rurlPackage = self.packages.${system}.default;
+
+        processComposeConfigFile = ./process-compose.yml;
 
       in
       {
-        # Entwicklungsumgebung (für `nix develop`)
         devShells.default = pkgs.mkShell {
           packages = [
             rustToolchain        
-            pkgs.sqlite-interactive 
+            pkgs.sqlite-interactive
+            pkgs.postgresql
+            pkgs.process-compose 
           ] ++ nativeBuildInputs ++ buildInputs; 
-
-          # Hier kannst du Umgebungsvariablen für die Dev-Shell setzen (optional)
-          # shellHook = ''
-          #  export DATABASE_URL="sqlite://./shortener.db"
-          # '';
         };
 
-        # Paketdefinition (für `nix build` und `nix run`)
         packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "rurl"; 
-          version = "0.1.0";     
-
-          src = ./.; 
-
-          # WICHTIG: Cargo.lock wird für reproduzierbare Builds benötigt!
+          pname = "rurl";
+          version = "0.1.0";
+          src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
-
-          # Systemabhängigkeiten, die von `cargo build` benötigt werden
-          nativeBuildInputs = nativeBuildInputs; 
-          buildInputs = buildInputs;            
-
-
+          nativeBuildInputs = nativeBuildInputs;
+          buildInputs = buildInputs;
         };
+
+        packages.start-dev = pkgs.writeShellScriptBin "start-dev" ''
+          #!${pkgs.runtimeShell}
+          set -e # Beenden bei Fehlern
+
+          export DB_COMMAND="${postgresAppProgram}"
+          export APP_COMMAND="${rurlPackage}/bin/rurl"
+          CONFIG_FILE="${processComposeConfigFile}"
+
+          export PATH=${pkgs.lib.makeBinPath [ pkgs.postgresql pkgs.process-compose ]}:$PATH
+
+          echo "Starting services with process-compose..."
+          ${pkgs.process-compose}/bin/process-compose -f "$CONFIG_FILE" up 
+        '';
+
+        apps.default = {
+          type = "app";
+          program = "${self.packages.${system}.start-dev}/bin/start-dev";
+        };
+
+        defaultApp = self.apps.${system}.default;
+
       }
     );
 }

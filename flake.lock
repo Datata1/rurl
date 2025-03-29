@@ -34,10 +34,31 @@
         "type": "github"
       }
     },
+    "postgres": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1743254546,
+        "narHash": "sha256-UEsQcOHc6DoMDh4VEDcx1aLNIIH+/w3Eq9L1V83lqLs=",
+        "owner": "Datata1",
+        "repo": "my_flakes",
+        "rev": "cef708542ae3847df25590a0cbf82906d9b0f083",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Datata1",
+        "repo": "my_flakes",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
+        "postgres": "postgres",
         "rust-overlay": "rust-overlay"
       }
     },

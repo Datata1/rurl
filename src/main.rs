@@ -1,29 +1,45 @@
-use std::{collections::HashMap, sync::Arc};
-use std::sync::{Mutex};
-use axum::{routing::get, routing::post, Router, Json};
 use axum::{
     extract::{Path, State},
-    response::{IntoResponse, Redirect},
     http::StatusCode,
+    response::{IntoResponse, Redirect},
+    routing::{get, post},
+    Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use dotenvy::dotenv;
 use rand::{distributions::Alphanumeric, Rng};
+use serde::{Deserialize, Serialize};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool; 
+use std::env;
 use url::Url;
-
-use tokio;
+use tracing::info;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 
 async fn redirect_handler(
-    State(url_map): State<Arc<Mutex<HashMap<String, String>>>>,
+    State(pool): State<PgPool>,
     Path(alias): Path<String>,
 ) -> Result<Redirect, StatusCode> {
-    let map = url_map.lock().unwrap();
-    if let Some(long_url) = map.get(&alias) {
-        println!("Redirecting '/{}' to {}", alias, long_url);
-        Ok(Redirect::permanent(long_url.as_str()))
-    } else {
-        println!("No mapping found for '/{}'", alias);
-        Err(StatusCode::NOT_FOUND)
+    info!("Versuche Weiterleitung für: {}", alias);
+
+    let result: Result<Option<(String,)>, sqlx::Error> = sqlx::query_as("SELECT original_url FROM urls WHERE short_code = $1")
+        .bind(&alias)
+        .fetch_optional(&pool) 
+        .await;
+
+    match result {
+        Ok(Some((original_url,))) => {
+            info!("Leite '{}' weiter nach: {}", alias, original_url);
+            Ok(Redirect::permanent(&original_url)) 
+        }
+        Ok(None) => {
+            info!("Kein Mapping gefunden für: {}", alias);
+            Err(StatusCode::NOT_FOUND)
+        }
+        Err(e) => {
+            eprintln!("Datenbankfehler beim Suchen von {}: {}", alias, e); 
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -38,52 +54,97 @@ struct ShortenResponse {
 }
 
 async fn shorten_handler(
-    State(url_map_mutex): State<Arc<Mutex<HashMap<String, String>>>>,
-    Json(payload): Json<ShortenRequest>, 
-) -> impl IntoResponse { 
+    State(pool): State<PgPool>,
+    Json(payload): Json<ShortenRequest>,
+) -> Result<impl IntoResponse, StatusCode> { 
 
+    // URL validieren
+    if Url::parse(&payload.url).is_err() {
+        info!("Ungültige URL empfangen: {}", payload.url);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // Generiere einen zufälligen Alias (ggf. wiederholen bei Kollision)
     let alias: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
-        .take(6)
+        .take(6) 
         .map(char::from)
         .collect();
 
-    // Hier wäre ein guter Ort für URL-Validierung mit dem `url`-Crate (optional)
-    if Url::parse(&payload.url).is_err() {
-        return Err(StatusCode::BAD_REQUEST); 
+    info!("Versuche '{}' zu kürzen auf Alias: {}", payload.url, alias);
+
+    let insert_result = sqlx::query(
+        "INSERT INTO urls (short_code, original_url) VALUES ($1, $2)"
+    )
+    .bind(&alias)
+    .bind(&payload.url)
+    .execute(&pool)
+    .await;
+
+    match insert_result {
+        Ok(_) => {
+            // TODO: Basis-URL aus Konfiguration lesen oder dynamisch ermitteln
+            let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+            let short_url = format!("{}/{}", base_url, alias);
+            let response = ShortenResponse { short_url };
+            info!("URL erfolgreich gekürzt: {} -> {}", payload.url, response.short_url);
+            Ok((StatusCode::CREATED, Json(response))) 
+        }
+        Err(e) => {
+             if let Some(db_err) = e.as_database_error() {
+                 if db_err.code().as_deref() == Some("23505") {
+                    eprintln!("Kollision beim Alias '{}'. Versuche es erneut oder implementiere Wiederholungslogik.", alias);
+                    return Err(StatusCode::CONFLICT);
+                 }
+            }
+            eprintln!("Datenbankfehler beim Einfügen: {}", e); 
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
-
-    { // Neuer Scope, um die Mutex-Sperre schneller freizugeben
-        // Map für Schreibzugriff sperren
-        let mut map = url_map_mutex.lock().unwrap();
-        println!("Shortening '{}' to '/{}'", payload.url, alias);
-        map.insert(alias.clone(), payload.url);
-        // Mutex wird hier freigegeben, wenn `map` den Scope verlässt
-    }
-
-    // TODO: Basis-URL aus Konfiguration lesen
-    let short_url = format!("http://127.0.0.1:3000/{}", alias);
-    let response = ShortenResponse { short_url };
-
-    Ok((StatusCode::CREATED, Json(response)))
 }
 
 #[tokio::main]
-async fn main() { 
-    let url_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new([
-        ("rust".to_string(), "https://www.rust-lang.org".to_string()),
-        ("google".to_string(), "https://www.google.com".to_string()),
-        ("github".to_string(), "https://www.github.com".to_string()),]
-        .iter().cloned().collect()
-    ));
+async fn main() -> Result<(), Box<dyn std::error::Error>> { 
+    
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "url_shortener=info,tower_http=info".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
+    
+    dotenv().ok();
+    info!("Environment Variablen geladen.");
+
+   
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL muss gesetzt sein");
+    info!("Verbinde mit Datenbank...");
+
+    
+    let pool = PgPoolOptions::new()
+        .max_connections(5) 
+        .connect(&database_url)
+        .await?; 
+    info!("Datenbankverbindungspool erfolgreich erstellt.");
+
+    // --- Datenbankmigrationen ausführen ---
+    info!("Führe Datenbankmigrationen aus...");
+    sqlx::migrate!("./migrations") 
+        .run(&pool) 
+        .await?; 
+    info!("Datenbankmigrationen erfolgreich abgeschlossen.");
+
+    // --- Axum App Router erstellen ---.
     let app = Router::new()
         .route("/:alias", get(redirect_handler))
-        .route("/shorten", post(shorten_handler)) 
-        .with_state(url_map); 
+        .route("/shorten", post(shorten_handler))
+        .with_state(pool);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
-    println!("Listening on: {}", listener.local_addr().unwrap());
+    // --- Server starten ---
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?; 
+    info!("Server lauscht auf: {}", listener.local_addr()?);
+    axum::serve(listener, app.into_make_service()).await?; 
 
-    axum::serve(listener, app).await.unwrap();
+    Ok(())
 }

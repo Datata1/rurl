@@ -1,13 +1,15 @@
 [package]
-name = "rurl"
+name = "url_shortener"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-axum = "0.7"
+axum = "0.7" # Prüfe die aktuellste Version
 tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 rand = "0.8"
-url = { version = "2" }
-tracing = { version = "0.1", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "postgres", "macros", "migrate" ] }
+dotenvy = "0.15" 
+tracing = "0.1" 
+tracing-subscriber = { version = "0.3", features = ["env-filter"] } 
