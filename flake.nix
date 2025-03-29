@@ -20,7 +20,7 @@
           inherit system overlays;
         };
 
-        # TODO: latest ist impure, besser wäre ein fester Wert
+        # TODO: latest ist impure, besser wäre ein statischer Wert
         rustToolchain = pkgs.rust-bin.stable.latest.default.override { 
            extensions = [ "rust-src" "rust-analyzer" ];
         };
@@ -67,6 +67,10 @@
 
           export DB_COMMAND="${postgresAppProgram}"
           export APP_COMMAND="${rurlPackage}/bin/rurl"
+          export DB_USER=$(whoami)
+          export DB_DATABASE=$(whoami)
+          echo $APP_COMMAND
+          export DATABASE_URL="postgres://''$(whoami):devpassword@localhost:5432/''$(whoami)"
           CONFIG_FILE="${processComposeConfigFile}"
 
           export PATH=${pkgs.lib.makeBinPath [ pkgs.postgresql pkgs.process-compose ]}:$PATH

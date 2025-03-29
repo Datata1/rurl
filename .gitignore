@@ -3,3 +3,4 @@
 /pgdata
 /pglockdir
 /pgsocket
+.env

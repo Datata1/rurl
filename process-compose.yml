@@ -1,10 +1,17 @@
 version: "0.5"
 
+environment:
+  - "DATABASE_URL=$DATABASE_URL"
+  - "RUST_LOG=info"
+
 processes:
   db:
-    command: /bin/sh -c "$DB_COMMAND"
+    command: echo $DATABASE_URL && /bin/sh -c "$DB_COMMAND"
+    ready_log_line: "is ready for connections."
   app:
     command: /bin/sh -c "$APP_COMMAND"
     depends_on:
       db:
-        condition: service_started
+        condition: process_log_ready
+    environment:
+      - "DATABASE_URL=$DATABASE_URL"

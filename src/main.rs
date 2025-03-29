@@ -5,7 +5,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use dotenvy::dotenv;
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
@@ -112,11 +111,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-
-    
-    dotenv().ok();
-    info!("Environment Variablen geladen.");
-
    
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL muss gesetzt sein");
     info!("Verbinde mit Datenbank...");

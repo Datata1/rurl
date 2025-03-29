@@ -1226,6 +1226,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rurl"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "rand",
+ "serde",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1983,21 +1997,6 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
-]
-
-[[package]]
-name = "url_shortener"
-version = "0.1.0"
-dependencies = [
- "axum",
- "dotenvy",
- "rand",
- "serde",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
 ]
 
 [[package]]
